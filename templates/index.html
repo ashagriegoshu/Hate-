@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="am">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Hate Speech Detector</title>
+    <style>
+        :root{
+            --card-bg: #ffffff;
+            --page-bg:#f4f6f8;
+            --accent:#2b6cb0;
+            --success-bg:#e6ffef;
+            --success-border:#28a745;
+            --danger-bg:#fff0f0;
+            --danger-border:#e55353;
+            --muted:#6b7280;
+        }
+        html,body{height:100%}
+        body {
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+            background: var(--page-bg);
+            margin:0;
+            color:#111827;
+            display:flex;
+            align-items:flex-start;
+            justify-content:center;
+            padding:40px 16px;
+        }
+        .box {
+            width:100%;
+            max-width:720px;
+            background: var(--card-bg);
+            padding:24px;
+            border-radius:12px;
+            box-shadow: 0 6px 24px rgba(15,23,42,0.08);
+        }
+        h2{margin:0 0 12px 0; font-size:20px}
+        p.lead{margin:6px 0 18px 0; color:var(--muted); font-size:14px}
+
+        form {display:block}
+        textarea {
+            width: 100%;
+            min-height:140px;
+            padding:12px;
+            font-size:16px;
+            border:1px solid #e6e8eb;
+            border-radius:8px;
+            resize:vertical;
+            box-sizing:border-box;
+            font-family:inherit;
+            line-height:1.4;
+        }
+        .controls {
+            margin-top:12px;
+            display:flex;
+            gap:8px;
+            align-items:center;
+            flex-wrap:wrap;
+        }
+        button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding:10px 16px;
+            border-radius:8px;
+            font-size:15px;
+            cursor:pointer;
+        }
+        button.secondary {
+            background:#f3f4f6;
+            color:#111827;
+            border: 1px solid #e6e8eb;
+        }
+        .result {
+            margin-top:18px;
+            padding:14px;
+            border-radius:8px;
+            font-weight:600;
+        }
+        .result small { font-weight:400; display:block; margin-top:6px; color:var(--muted) }
+
+        .result.success {
+            background: var(--success-bg);
+            border: 1px solid var(--success-border);
+            color: #064e3b;
+        }
+        .result.danger {
+            background: var(--danger-bg);
+            border: 1px solid var(--danger-border);
+            color: #7f1d1d;
+        }
+
+        .meta {
+            margin-top:8px;
+            color:var(--muted);
+            font-size:13px;
+        }
+
+        @media (max-width:520px){
+            .box{padding:16px}
+            textarea{min-height:120px}
+        }
+    </style>
+</head>
+<body>
+<div class="box" role="main" aria-labelledby="title">
+    <h2 id="title">🛑 Hate Speech Detection (Ge’ez / Himtagna)</h2>
+    <p class="lead">Paste text below and click "Analyze" to classify. Output shows a readable label in Amharic + English.</p>
+
+    <form action="{{ url_for('predict') }}" method="post" autocomplete="off" novalidate>
+        <label for="text" style="display:none">ጽሑፍ</label>
+        <textarea id="text"  name="text" placeholder="ጽሑፍ አስገባ..." required aria-label="Input text to classify">{{ input_text|e }}</textarea>
+        <!--textarea id="text" class = "translitInput" name="text" placeholder="ጽሑፍ አስገባ..." required aria-label="Input text to classify">{{ input_text|e }}</textarea-->
+
+        <div class="controls">
+            <button type="submit">Analyze</button>
+            <button type="button" class="secondary" onclick="document.getElementById('text').value='';">Clear</button>
+            <div style="margin-left:auto" class="meta">Model: TF‑IDF + FastText + LinearSVC + SBi-LSTM</div>
+        </div>
+    </form>
+
+    {% if prediction_text %}
+        {% set is_non_hate = 'Non-Hate' in prediction_text or 'Non‑Hate' in prediction_text %}
+        <div class="result {{ 'success' if is_non_hate else 'danger' }}" role="status" aria-live="polite">
+            {{ prediction_text|e }}
+            <small>Input: {{ input_text|e }}</small>
+        </div>
+    {% endif %}
+</div>
+<script>
+const specialConsonants = {
+  'h': {
+    normal: ['ሀ', 'ሁ', 'ሂ', 'ሃ', 'ሄ', 'ህ', 'ሆ'],
+    //shift:  ['ሐ', 'ሑ', 'ሒ', 'ሓ', 'ሔ', 'ሕ', 'ሖ'],
+   // caps:   ['ኀ', 'ኁ', 'ኂ', 'ኃ', 'ኄ', 'ኅ', 'ኆ','ኋ'],
+    shiftCaps: ['ኸ', 'ኹ', 'ኺ', 'ኻ', 'ኼ', 'ኽ', 'ኾ', 'ዃ']
+  },
+  'l': {
+    normal: ['ለ', 'ሉ', 'ሊ', 'ላ', 'ሌ', 'ል', 'ሎ', 'ሏ']
+  },
+  'm': {
+    normal: ['መ', 'ሙ', 'ሚ', 'ማ', 'ሜ', 'ም', 'ሞ', 'ሟ']
+  },
+  's': {
+    normal: ['ሰ', 'ሱ', 'ሲ', 'ሳ', 'ሴ', 'ስ', 'ሶ', 'ሷ'],   
+    //shift:  ['ሠ', 'ሡ', 'ሢ', 'ሣ', 'ሤ', 'ሥ', 'ሦ', 'ሧ'],
+    caps:   ['ሸ', 'ሹ', 'ሺ', 'ሻ', 'ሼ', 'ሽ', 'ሾ',  'ሿ']
+  },
+  'r': {
+    normal: ['ረ', 'ሩ', 'ሪ', 'ራ', 'ሬ', 'ር', 'ሮ', 'ሯ']
+  },
+  'q': {
+    normal: ['ቀ', 'ቁ', 'ቂ', 'ቃ', 'ቄ', 'ቅ', 'ቆ', 'ቋ', 'ቈ']
+  },
+  'b': {
+    normal: ['በ', 'ቡ', 'ቢ', 'ባ', 'ቤ', 'ብ', 'ቦ', 'ቧ']
+  },
+  'v': {
+    normal: ['ቨ', 'ቩ', 'ቪ', 'ቫ', 'ቬ', 'ቭ', 'ቮ', 'ቯ']
+  },
+  't': {
+    normal: ['ተ', 'ቱ', 'ቲ', 'ታ', 'ቴ', 'ት', 'ቶ', 'ቷ'],
+    shift:  ['ጠ', 'ጡ', 'ጢ', 'ጣ', 'ጤ', 'ጥ', 'ጦ', 'ጧ'],
+    caps:   ['ጸ', 'ጹ', 'ጺ', 'ጻ', 'ጼ', 'ጽ', 'ጾ', 'ጿ'  ],
+    //shiftCaps: ['ፀ', 'ፁ', 'ፂ', 'ፃ', 'ፄ', 'ፅ', 'ፆ']
+  },
+  'c': {
+    normal: ['ቸ', 'ቹ', 'ቺ', 'ቻ', 'ቼ', 'ች', 'ቾ', 'ቿ'],   
+    shift:  ['ጨ', 'ጩ', 'ጪ', 'ጫ', 'ጬ', 'ጭ', 'ጮ', 'ጯ']
+  },
+  'n': {
+    normal: ['ነ', 'ኑ', 'ኒ', 'ና', 'ኔ', 'ን', 'ኖ', 'ኗ'],   
+    shift:  ['ኘ', 'ኙ', 'ኚ', 'ኛ', 'ኜ', 'ኝ', 'ኞ', 'ኟ']
+  },
+  'x': {
+    normal: ['አ', 'ኡ', 'ኢ', 'ኣ', 'ኤ', 'እ', 'ኦ', 'ኧ'],   
+    //shift:  ['ዐ', 'ዑ', 'ዒ', 'ዓ', 'ዔ', 'ዕ', 'ዖ']
+  },
+  'k': {
+    normal: ['ከ', 'ኩ', 'ኪ', 'ካ', 'ኬ', 'ክ', 'ኮ', 'ኳ']
+  },
+  'w': {
+    normal: ['ወ', 'ዉ', 'ዊ', 'ዋ', 'ዌ', 'ው', 'ዎ']
+  },
+  'z': {
+    normal: ['ዘ', 'ዙ', 'ዚ', 'ዛ', 'ዜ', 'ዝ', 'ዞ', 'ዟ'],   
+    shift:  ['ዠ', 'ዡ', 'ዢ', 'ዣ', 'ዤ', 'ዥ', 'ዦ',  'ዧ']
+  },
+  'y': {
+    shift: ['የ', 'ዩ', 'ዪ', 'ያ', 'ዬ', 'ይ', 'ዮ']
+  },
+  'd': {
+    normal: ['ደ', 'ዱ', 'ዲ', 'ዳ', 'ዴ', 'ድ', 'ዶ', 'ዷ']
+  },
+  'j': {
+    normal: ['ጀ', 'ጁ', 'ጂ', 'ጃ', 'ጄ', 'ጅ', 'ጆ', 'ጇ']
+  },
+  'g': {
+    normal: ['ገ', 'ጉ', 'ጊ', 'ጋ', 'ጌ', 'ግ', 'ጎ', 'ጓ']
+  },
+  'p': {
+    normal: ['ፐ', 'ፑ', 'ፒ', 'ፓ', 'ፔ', 'ፕ', 'ፖ', 'ፗ'],   
+    shift:  ['ጰ', 'ጱ', 'ጲ', 'ጳ', 'ጴ', 'ጵ', 'ጶ', 'ጷ']
+  },
+  'f': {
+    normal: ['ፈ', 'ፉ', 'ፊ', 'ፋ', 'ፌ', 'ፍ', 'ፎ', 'ፏ']
+  }
+};
+
+const vowelIndex = {
+  '': 0, // default if no vowel
+  'u': 1,
+  'i': 2,
+  'a': 3,
+  'y': 4,
+  'e': 5,
+  'o': 6,
+  'O': 7,
+  'W': 9,
+  'Wu': 10,
+  'Wi': 11,
+  'Wy': 12,
+  'Wo': 13,
+  'WI': 14,
+};
+
+let capsLockOn = false;
+document.addEventListener('keydown', (e) => {
+  if (e.getModifierState) capsLockOn = e.getModifierState('CapsLock');
+});
+
+document.querySelectorAll('.translitInput').forEach(inputField => {
+  let buffer = '';
+  let lastInsertedIndex = -1;
+
+  inputField.addEventListener('keydown', function (e) {
+    const key = e.key.toLowerCase();
+    const isVowel = vowelIndex.hasOwnProperty(key);
+
+    if (specialConsonants[buffer] && isVowel) {
+      e.preventDefault();
+      const mod = e.shiftKey && capsLockOn ? 'shiftCaps' :
+                  e.shiftKey ? 'shift' :
+                  capsLockOn ? 'caps' : 'normal';
+
+      const form = specialConsonants[buffer][mod][vowelIndex[key]];
+      const value = inputField.value;
+
+      inputField.value = value.slice(0, lastInsertedIndex) + form + value.slice(lastInsertedIndex + 1);
+      buffer = '';
+      lastInsertedIndex = -1;
+      return;
+    }
+
+    if (specialConsonants[key]) {
+      e.preventDefault();
+      const mod = e.shiftKey && capsLockOn ? 'shiftCaps' :
+                  e.shiftKey ? 'shift' :
+                  capsLockOn ? 'caps' : 'normal';
+
+      const defaultForm = specialConsonants[key][mod][0];
+      const pos = inputField.selectionStart;
+      const value = inputField.value;
+
+      inputField.value = value.slice(0, pos) + defaultForm + value.slice(pos);
+      inputField.setSelectionRange(pos + 1, pos + 1);
+
+      buffer = key;
+      lastInsertedIndex = pos;
+      return;
+    }
+
+    if ([' ', 'Backspace', 'Enter'].includes(e.key)) {
+      buffer = '';
+      lastInsertedIndex = -1;
+    }
+  });
+});
+</script>
+</body>
+</html>
